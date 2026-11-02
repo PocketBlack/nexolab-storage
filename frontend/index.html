@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a0a0a">
+  <meta name="description" content="Transfiere archivos originales entre tu PC y tu celular. Sin compresión.">
+  <title>Nexo Lab Storage — Tu trabajo, intacto</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
+  <script src="config.js"></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="Nexo Lab Storage inicio"><span class="brand-mark">N</span><span>NEXO <i>LAB</i><small>STORAGE</small></span></a>
+    <div class="top-note"><span class="status-dot"></span> Transferencia privada · Calidad original</div>
+  </header>
+  <main>
+    <section class="hero">
+      <div class="eyebrow"><span></span> PARA CREADORES, AGENCIAS Y MARCAS</div>
+      <h1>Tu trabajo merece verse<br><em>exactamente como lo creaste.</em></h1>
+      <p>Envía videos 4K, fotografías RAW y archivos pesados sin perder un solo detalle. De tu computadora al celular, sin fricción.</p>
+    </section>
+    <section class="workspace" aria-label="Transferir archivos">
+      <div class="workspace-head">
+        <div><span class="section-kicker">01 / TRANSFERENCIA</span><h2>Envía tus archivos</h2></div>
+        <span class="privacy"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 7V5a4 4 0 0 1 8 0v2M3 7h10v8H3z"/></svg> Enlace privado</span>
+      </div>
+      <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Seleccionar o arrastrar archivos">
+        <input id="fileInput" type="file" multiple hidden>
+        <div class="upload-symbol"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 21V5m0 0-6 6m6-6 6 6M5 21v6h22v-6"/></svg></div>
+        <h3>Arrastra tus archivos aquí</h3>
+        <p>o <button id="browseBtn" class="text-button" type="button">explora tu computadora</button></p>
+        <div class="file-types"><span>VIDEO 4K</span><span>FOTOGRAFÍA RAW</span><span>ZIP / PSD / MOV</span><span>Y MÁS</span></div>
+      </div>
+      <div id="fileList" class="file-list" aria-live="polite"></div>
+      <div class="actions"><button id="uploadBtn" class="primary-btn" disabled>Subir archivos <span aria-hidden="true">↗</span></button><span class="action-note">Tus archivos nunca pasan por nuestros servidores.</span></div>
+      <div id="status" class="status-message" role="status"></div>
+    </section>
+    <section id="results" class="results" hidden>
+      <div class="result-heading"><span class="success-mark">✓</span><div><span class="section-kicker">02 / LISTO PARA COMPARTIR</span><h2>Tu archivo está listo</h2></div></div>
+      <p class="result-copy">Escanea el código QR desde tu celular o copia el enlace para descargar el archivo original.</p>
+      <div id="resultCards" class="result-cards"></div>
+    </section>
+    <section class="promise"><div class="promise-line"></div><p><strong>Sin compresión.</strong> Sin cuentas. Sin complicaciones.</p><span>Tu contenido, exactamente como salió de tu proceso creativo.</span></section>
+  </main>
+  <footer><span>© 2026 NEXO LAB STORAGE</span><span>HECHO PARA CREAR. DISEÑADO PARA TRANSFERIR.</span></footer>
+</body>
+</html>
