@@ -1,1 +1,6 @@
-[build]\n  base = "frontend"\n  publish = "."\n\n[build.environment]\n  NODE_VERSION = "20"\n
+[build]
+  base = "frontend"
+  publish = "."
+
+[build.environment]
+  NODE_VERSION = "20"
