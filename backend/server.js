@@ -1,4 +1,5 @@
 const crypto = require("node:crypto");
+const path = require("node:path");
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -48,13 +49,21 @@ function getS3() {
 }
 function safeFilename(name) {
   const cleaned = String(name || "file").normalize("NFKC")
-    .replace(/[\\/\\\\]/g, "_").replace(/[\\r\\n\\0]/g, "")
+    .replace(/[\/\\]/g, "_")
+    .replace(/[\u0000-\u001f\u007f]/g, "")
     .trim().slice(0, 180);
   return cleaned || "file";
 }
 function makeObjectKey(filename) {
-  const ext = filename.includes(".") ? filename.split(".").pop().toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12) : "";
-  return `uploads/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}${ext ? "." + ext : ""}`;
+  // Keep only the final file extension in the opaque storage key.
+  const ext = path.extname(filename).slice(1).toLowerCase()
+    .replace(/[^a-z0-9]/g, "").slice(0, 12);
+  return \`uploads/\${new Date().toISOString().slice(0, 10)}/\${crypto.randomUUID()}\${ext ? "." + ext : ""}\`;
+}
+function contentDisposition(filename) {
+  // RFC 5987 filename* preserves Unicode; filename provides an ASCII fallback.
+  const fallback = filename.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
+  return \`attachment; filename="\${fallback}"; filename*=UTF-8''\${encodeURIComponent(filename)}\`;
 }
 function validateFilePayload(body) {
   const filename = safeFilename(body?.filename);
@@ -99,7 +108,7 @@ app.post("/api/download-url", async (req, res, next) => {
     const command = new GetObjectCommand({
       Bucket: process.env.BUCKET_NAME,
       Key: key,
-      ResponseContentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`
+      ResponseContentDisposition: contentDisposition(filename)
     });
     const downloadUrl = await getSignedUrl(getS3(), command, { expiresIn: downloadTtl });
     res.json({ downloadUrl, expiresIn: downloadTtl });
