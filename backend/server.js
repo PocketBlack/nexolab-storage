@@ -58,12 +58,12 @@ function makeObjectKey(filename) {
   // Keep only the final file extension in the opaque storage key.
   const ext = path.extname(filename).slice(1).toLowerCase()
     .replace(/[^a-z0-9]/g, "").slice(0, 12);
-  return \`uploads/\${new Date().toISOString().slice(0, 10)}/\${crypto.randomUUID()}\${ext ? "." + ext : ""}\`;
+  return "uploads/" + new Date().toISOString().slice(0, 10) + "/" + crypto.randomUUID() + (ext ? "." + ext : "");
 }
 function contentDisposition(filename) {
   // RFC 5987 filename* preserves Unicode; filename provides an ASCII fallback.
   const fallback = filename.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
-  return \`attachment; filename="\${fallback}"; filename*=UTF-8''\${encodeURIComponent(filename)}\`;
+  return "attachment; filename=\"" + fallback + "\"; filename*=UTF-8" + String.fromCharCode(39,39) + encodeURIComponent(filename);
 }
 function validateFilePayload(body) {
   const filename = safeFilename(body?.filename);
