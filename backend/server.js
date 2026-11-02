@@ -3,7 +3,7 @@ const path = require("node:path");
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
-const { S3Client, PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { S3Client, PutObjectCommand, GetObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 const app = express();
@@ -94,6 +94,55 @@ app.post("/api/upload-url", async (req, res, next) => {
     });
     const uploadUrl = await getSignedUrl(getS3(), command, { expiresIn: uploadTtl });
     res.json({ uploadUrl, key, filename, expiresIn: uploadTtl });
+  } catch (err) { next(err); }
+});
+
+app.post("/api/multipart/create", async (req, res, next) => {
+  try {
+    const { filename, size, contentType } = validateFilePayload(req.body);
+    const key = makeObjectKey(filename);
+    const created = await getS3().send(new CreateMultipartUploadCommand({
+      Bucket: process.env.BUCKET_NAME, Key: key, ContentType: contentType,
+      Metadata: { originalname: encodeURIComponent(filename), filesize: String(size) }
+    }));
+    res.json({ key, uploadId: created.UploadId, filename });
+  } catch (err) { next(err); }
+});
+app.post("/api/multipart/part-url", async (req, res, next) => {
+  try {
+    const key = String(req.body?.key || ""), uploadId = String(req.body?.uploadId || "");
+    const partNumber = Number(req.body?.partNumber);
+    if (!key.startsWith("uploads/") || key.includes("..") || !uploadId || !Number.isInteger(partNumber) || partNumber < 1 || partNumber > 10000)
+      return res.status(400).json({ error: "Invalid multipart part request" });
+    const url = await getSignedUrl(getS3(), new UploadPartCommand({
+      Bucket: process.env.BUCKET_NAME, Key: key, UploadId: uploadId, PartNumber: partNumber
+    }), { expiresIn: uploadTtl });
+    res.json({ url });
+  } catch (err) { next(err); }
+});
+app.post("/api/multipart/complete", async (req, res, next) => {
+  try {
+    const key = String(req.body?.key || ""), uploadId = String(req.body?.uploadId || "");
+    const parts = req.body?.parts;
+    if (!key.startsWith("uploads/") || key.includes("..") || !uploadId || !Array.isArray(parts) || !parts.length || parts.length > 10000)
+      return res.status(400).json({ error: "Invalid multipart completion request" });
+    const normalized = parts.map(p => ({ PartNumber: Number(p.PartNumber), ETag: String(p.ETag || "") }));
+    if (normalized.some(p => !Number.isInteger(p.PartNumber) || p.PartNumber < 1 || !p.ETag))
+      return res.status(400).json({ error: "Invalid multipart parts" });
+    await getS3().send(new CompleteMultipartUploadCommand({
+      Bucket: process.env.BUCKET_NAME, Key: key, UploadId: uploadId,
+      MultipartUpload: { Parts: normalized.sort((a,b) => a.PartNumber-b.PartNumber) }
+    }));
+    res.json({ ok: true, key });
+  } catch (err) { next(err); }
+});
+app.post("/api/multipart/abort", async (req, res, next) => {
+  try {
+    const key = String(req.body?.key || ""), uploadId = String(req.body?.uploadId || "");
+    if (!key.startsWith("uploads/") || key.includes("..") || !uploadId)
+      return res.status(400).json({ error: "Invalid multipart abort request" });
+    await getS3().send(new AbortMultipartUploadCommand({ Bucket: process.env.BUCKET_NAME, Key: key, UploadId: uploadId }));
+    res.json({ ok: true });
   } catch (err) { next(err); }
 });
 
