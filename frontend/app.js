@@ -12,6 +12,7 @@
     localStorage.setItem(SESSION_KEY, sessionId);
   }
   let files = [], uploading = false, controller = null;
+  const progressState = new Map();
   const bytes = (n) => {
     if (!n) return "0 B";
     const units = ["B", "KB", "MB", "GB", "TB"];
@@ -35,7 +36,11 @@
       all.findIndex((item) => item.name === file.name && item.size === file.size &&
         item.lastModified === file.lastModified) === i);
     render();
-    say(files.length < before + fresh.length ? "Se omitieron archivos duplicados de la selección." : "");
+    if (files.length < before + fresh.length) {
+      say("Se omitieron archivos duplicados de la selección.");
+    } else if (uploading && files.length > before) {
+      say((files.length - before) + " archivo(s) agregado(s) a la cola. Se subirán al terminar el actual.");
+    }
   }
   function render() {
     list.replaceChildren();
@@ -47,9 +52,13 @@
         (uploading ? "disabled" : "") + '>×</button></div>';
       row.querySelector(".file-icon").textContent = (file.name.split(".").pop() || "FILE").slice(0, 4).toUpperCase();
       row.querySelector(".file-name").textContent = file.name;
-      row.querySelector(".file-meta").textContent = bytes(file.size);
+      const saved = progressState.get(file);
+      row.querySelector(".file-meta").textContent = saved?.meta || bytes(file.size);
+      row.querySelector(".file-progress span").style.width = (saved?.percent || 0) + "%";
+      row.querySelector(".file-state").textContent = saved?.label || "Listo";
       row.querySelector(".remove-file").addEventListener("click", () => {
         if (uploading) return;
+        progressState.delete(file);
         files.splice(index, 1);
         render();
         say("Archivo quitado de la selección.");
@@ -63,11 +72,16 @@
     clearBtn.hidden = !files.length || uploading;
     cancel.hidden = !uploading;
     cancel.disabled = false;
-    browse.disabled = uploading;
+    browse.disabled = false;
   }
   function progress(index, percent, label) {
     const row = list.querySelector('[data-index="' + index + '"]');
     if (!row) return;
+    const file = files[index];
+    if (file) {
+      const saved = progressState.get(file) || {};
+      progressState.set(file, { ...saved, percent, label });
+    }
     row.querySelector(".file-progress span").style.width = percent + "%";
     row.querySelector(".file-state").textContent = label;
   }
@@ -140,9 +154,13 @@
       lastTime = now;
       const eta = speed > 0 ? Math.ceil(Math.max(0, file.size - total) / speed) : 0;
       const row = list.querySelector('[data-index="' + index + '"]');
-      if (row) row.querySelector(".file-meta").textContent =
-        bytes(file.size) + " · " + (speed / 1024 / 1024).toFixed(2) + " MB/s · " +
-        (eta ? "~" + Math.ceil(eta / 60) + " min restantes" : "calculando velocidad");
+      if (row) {
+        const meta = bytes(file.size) + " · " + (speed / 1024 / 1024).toFixed(2) + " MB/s · " +
+          (eta ? "~" + Math.ceil(eta / 60) + " min restantes" : "calculando velocidad");
+        const saved = progressState.get(file) || {};
+        progressState.set(file, { ...saved, meta });
+        row.querySelector(".file-meta").textContent = meta;
+      }
     }, 1000);
     async function worker() {
       while (next < count && !failed && !signal.aborted) {
@@ -260,6 +278,7 @@
         progress(index, 100, "Completado");
       }
       say("Transferencia completada. Tus enlaces están listos.");
+      files.forEach((file) => progressState.delete(file));
       files = [];
       render();
     } catch (error) {
@@ -302,6 +321,7 @@
   drop.addEventListener("drop", (event) => add(event.dataTransfer.files));
   clearBtn.addEventListener("click", () => {
     if (uploading) return;
+    files.forEach((file) => progressState.delete(file));
     files = [];
     render();
     say("Selección cancelada.");
