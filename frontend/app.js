@@ -5,6 +5,12 @@
   const list = $("fileList"), upload = $("uploadBtn"), cancel = $("cancelUploadBtn");
   const clearBtn = $("clearFilesBtn"), status = $("status");
   const results = $("results"), cards = $("resultCards");
+  const SESSION_KEY = "nexo_private_session_v1";
+  let sessionId = sessionStorage.getItem(SESSION_KEY);
+  if (!sessionId) {
+    sessionId = crypto.randomUUID();
+    sessionStorage.setItem(SESSION_KEY, sessionId);
+  }
   let files = [], uploading = false, controller = null;
   const bytes = (n) => {
     if (!n) return "0 B";
@@ -69,7 +75,7 @@
     const response = await fetch(API + path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
+      body: JSON.stringify({ ...data, sessionId }),
       signal
     });
     const payload = await response.json().catch(() => ({}));
@@ -184,7 +190,7 @@
     const element = document.createElement("article");
     element.className = "result-card";
     const heading = document.createElement("h3");
-    heading.textContent = file.name;
+    heading.textContent = file.name || file.filename || "Archivo";
     const qr = document.createElement("div");
     qr.className = "qr-wrap";
     const linkRow = document.createElement("div");
@@ -223,8 +229,7 @@
     const signal = controller.signal;
     uploading = true;
     render();
-    results.hidden = true;
-    cards.replaceChildren();
+    if (!cards.childElementCount) results.hidden = true;
     try {
       for (let index = 0; index < files.length; index++) {
         if (signal.aborted) throw cancelError();
@@ -308,5 +313,26 @@
     controller.abort();
   });
   upload.addEventListener("click", run);
+  async function loadSessionFiles() {
+    try {
+      const data = await post("/api/files", {});
+      cards.replaceChildren();
+      (data.files || []).forEach((item) => card({
+        name: item.filename, size: item.size
+      }, item.downloadUrl));
+      results.hidden = !(data.files || []).length;
+      if ((data.files || []).length) say("Se recuperaron " + data.files.length + " archivo(s) de esta sesión privada.");
+    } catch (error) {
+      say("No se pudo recuperar el historial de esta sesión: " + error.message, true);
+    }
+  }
+  const newSessionBtn = $("newSessionBtn");
+  if (newSessionBtn) newSessionBtn.addEventListener("click", () => {
+    if (uploading) return;
+    if (!confirm("¿Crear una sesión privada nueva? Los archivos actuales seguirán guardados, pero esta sesión dejará de mostrarlos.")) return;
+    sessionStorage.removeItem(SESSION_KEY);
+    location.reload();
+  });
   render();
+  loadSessionFiles();
 })();
