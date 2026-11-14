@@ -3,7 +3,7 @@ const path = require("node:path");
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
-const { S3Client, PutObjectCommand, GetObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand } = require("@aws-sdk/client-s3");
+const { S3Client, PutObjectCommand, GetObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand, ListObjectsV2Command, HeadObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 const app = express();
@@ -54,11 +54,18 @@ function safeFilename(name) {
     .trim().slice(0, 180);
   return cleaned || "file";
 }
-function makeObjectKey(filename) {
+function validSessionId(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
+}
+function sessionPrefix(sessionId) {
+  if (!validSessionId(sessionId)) { const err = new Error("Invalid or missing private session"); err.status = 400; throw err; }
+  return "sessions/" + sessionId + "/uploads/";
+}
+function makeObjectKey(filename, sessionId) {
   // Keep only the final file extension in the opaque storage key.
   const ext = path.extname(filename).slice(1).toLowerCase()
     .replace(/[^a-z0-9]/g, "").slice(0, 12);
-  return "uploads/" + new Date().toISOString().slice(0, 10) + "/" + crypto.randomUUID() + (ext ? "." + ext : "");
+  return sessionPrefix(sessionId) + new Date().toISOString().slice(0, 10) + "/" + crypto.randomUUID() + (ext ? "." + ext : "");
 }
 function contentDisposition(filename) {
   // RFC 5987 filename* preserves Unicode; filename provides an ASCII fallback.
@@ -85,7 +92,7 @@ app.get("/health", (_req, res) => res.status(200).json({
 app.post("/api/upload-url", async (req, res, next) => {
   try {
     const { filename, size, contentType } = validateFilePayload(req.body);
-    const key = makeObjectKey(filename);
+    const key = makeObjectKey(filename, req.body?.sessionId);
     const command = new PutObjectCommand({
       Bucket: process.env.BUCKET_NAME,
       Key: key,
@@ -112,7 +119,7 @@ app.post("/api/multipart/part-url", async (req, res, next) => {
   try {
     const key = String(req.body?.key || ""), uploadId = String(req.body?.uploadId || "");
     const partNumber = Number(req.body?.partNumber);
-    if (!key.startsWith("uploads/") || key.includes("..") || !uploadId || !Number.isInteger(partNumber) || partNumber < 1 || partNumber > 10000)
+    if (!key.startsWith(sessionPrefix(req.body?.sessionId)) || key.includes("..") || !uploadId || !Number.isInteger(partNumber) || partNumber < 1 || partNumber > 10000)
       return res.status(400).json({ error: "Invalid multipart part request" });
     const url = await getSignedUrl(getS3(), new UploadPartCommand({
       Bucket: process.env.BUCKET_NAME, Key: key, UploadId: uploadId, PartNumber: partNumber
@@ -143,6 +150,22 @@ app.post("/api/multipart/abort", async (req, res, next) => {
       return res.status(400).json({ error: "Invalid multipart abort request" });
     await getS3().send(new AbortMultipartUploadCommand({ Bucket: process.env.BUCKET_NAME, Key: key, UploadId: uploadId }));
     res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+app.post("/api/files", async (req, res, next) => {
+  try {
+    const prefix = sessionPrefix(req.body?.sessionId);
+    const result = await getS3().send(new ListObjectsV2Command({ Bucket: process.env.BUCKET_NAME, Prefix: prefix, MaxKeys: 50 }));
+    const objects = await Promise.all((result.Contents || []).map(async (item) => {
+      const head = await getS3().send(new HeadObjectCommand({ Bucket: process.env.BUCKET_NAME, Key: item.Key }));
+      const filename = safeFilename(decodeURIComponent(head.Metadata?.originalname || item.Key.split("/").pop()));
+      const command = new GetObjectCommand({ Bucket: process.env.BUCKET_NAME, Key: item.Key, ResponseContentDisposition: contentDisposition(filename) });
+      const downloadUrl = await getSignedUrl(getS3(), command, { expiresIn: downloadTtl });
+      return { key: item.Key, filename, size: item.Size || 0, lastModified: item.LastModified || null, downloadUrl };
+    }));
+    objects.sort((a, b) => new Date(b.lastModified || 0) - new Date(a.lastModified || 0));
+    res.json({ files: objects, limit: 50, expiresIn: downloadTtl });
   } catch (err) { next(err); }
 });
 
