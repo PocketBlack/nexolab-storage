@@ -38,8 +38,15 @@
         <div class="file-types"><span>VIDEO 4K</span><span>FOTOGRAFÍA RAW</span><span>ZIP / PSD / MOV</span><span>Y MÁS</span></div>
       </div>
       <div id="fileList" class="file-list" aria-live="polite"></div>
-      <div class="actions"><div class="action-buttons"><button id="uploadBtn" class="primary-btn" disabled>Subir archivos <span aria-hidden="true">↗</span></button><button id="clearFilesBtn" class="secondary-btn" type="button" hidden disabled>Cancelar selección</button></div><span class="action-note">Tus archivos nunca pasan por nuestros servidores.</span></div>
-      <div id="status" class="status-message" role="status"></div>
+      <div class="actions">
+        <div class="action-buttons">
+          <button id="uploadBtn" class="primary-btn" disabled>Subir archivos <span aria-hidden="true">↗</span></button>
+          <button id="clearFilesBtn" class="secondary-btn" type="button" hidden disabled>Cancelar selección</button>
+          <button id="cancelUploadBtn" class="danger-btn" type="button" hidden>Cancelar subida</button>
+        </div>
+        <span class="action-note">Tus archivos nunca pasan por nuestros servidores.</span>
+      </div>
+      <div id="status" class="status-message" role="status" aria-live="polite"></div>
     </section>
     <section id="results" class="results" hidden>
       <div class="result-heading"><span class="success-mark">✓</span><div><span class="section-kicker">02 / LISTO PARA COMPARTIR</span><h2>Tu archivo está listo</h2></div></div>
