@@ -107,7 +107,7 @@ app.post("/api/upload-url", async (req, res, next) => {
 app.post("/api/multipart/create", async (req, res, next) => {
   try {
     const { filename, size, contentType } = validateFilePayload(req.body);
-    const key = makeObjectKey(filename);
+    const key = makeObjectKey(filename, req.body?.sessionId);
     const created = await getS3().send(new CreateMultipartUploadCommand({
       Bucket: process.env.BUCKET_NAME, Key: key, ContentType: contentType,
       Metadata: { originalname: encodeURIComponent(filename), filesize: String(size) }
@@ -131,7 +131,7 @@ app.post("/api/multipart/complete", async (req, res, next) => {
   try {
     const key = String(req.body?.key || ""), uploadId = String(req.body?.uploadId || "");
     const parts = req.body?.parts;
-    if (!key.startsWith("uploads/") || key.includes("..") || !uploadId || !Array.isArray(parts) || !parts.length || parts.length > 10000)
+    if (!key.startsWith(sessionPrefix(req.body?.sessionId)) || key.includes("..") || !uploadId || !Array.isArray(parts) || !parts.length || parts.length > 10000)
       return res.status(400).json({ error: "Invalid multipart completion request" });
     const normalized = parts.map(p => ({ PartNumber: Number(p.PartNumber), ETag: String(p.ETag || "") }));
     if (normalized.some(p => !Number.isInteger(p.PartNumber) || p.PartNumber < 1 || !p.ETag))
@@ -146,7 +146,7 @@ app.post("/api/multipart/complete", async (req, res, next) => {
 app.post("/api/multipart/abort", async (req, res, next) => {
   try {
     const key = String(req.body?.key || ""), uploadId = String(req.body?.uploadId || "");
-    if (!key.startsWith("uploads/") || key.includes("..") || !uploadId)
+    if (!key.startsWith(sessionPrefix(req.body?.sessionId)) || key.includes("..") || !uploadId)
       return res.status(400).json({ error: "Invalid multipart abort request" });
     await getS3().send(new AbortMultipartUploadCommand({ Bucket: process.env.BUCKET_NAME, Key: key, UploadId: uploadId }));
     res.json({ ok: true });
@@ -174,7 +174,7 @@ app.post("/api/download-url", async (req, res, next) => {
     if (!storageConfigured()) return res.status(503).json({ error: "Object storage is not configured" });
     const key = String(req.body?.key || "");
     const filename = safeFilename(req.body?.filename || "download");
-    if (!key.startsWith("uploads/") || key.length > 1024 || key.includes("..")) {
+    if (!key.startsWith(sessionPrefix(req.body?.sessionId)) || key.length > 1024 || key.includes("..")) {
       return res.status(400).json({ error: "Invalid object key" });
     }
     const command = new GetObjectCommand({
