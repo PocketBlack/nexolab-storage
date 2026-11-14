@@ -6,10 +6,10 @@
   const clearBtn = $("clearFilesBtn"), status = $("status");
   const results = $("results"), cards = $("resultCards");
   const SESSION_KEY = "nexo_private_session_v1";
-  let sessionId = sessionStorage.getItem(SESSION_KEY);
+  let sessionId = localStorage.getItem(SESSION_KEY);
   if (!sessionId) {
     sessionId = crypto.randomUUID();
-    sessionStorage.setItem(SESSION_KEY, sessionId);
+    localStorage.setItem(SESSION_KEY, sessionId);
   }
   let files = [], uploading = false, controller = null;
   const bytes = (n) => {
@@ -330,7 +330,7 @@
   if (newSessionBtn) newSessionBtn.addEventListener("click", () => {
     if (uploading) return;
     if (!confirm("¿Crear una sesión privada nueva? Los archivos actuales seguirán guardados, pero esta sesión dejará de mostrarlos.")) return;
-    sessionStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(SESSION_KEY);
     location.reload();
   });
   render();
