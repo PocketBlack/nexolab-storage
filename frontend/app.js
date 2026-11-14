@@ -56,6 +56,7 @@
     clearBtn.disabled = !files.length || uploading;
     clearBtn.hidden = !files.length || uploading;
     cancel.hidden = !uploading;
+    cancel.disabled = false;
     browse.disabled = uploading;
   }
   function progress(index, percent, label) {
@@ -224,7 +225,6 @@
     render();
     results.hidden = true;
     cards.replaceChildren();
-    const completed = [];
     try {
       for (let index = 0; index < files.length; index++) {
         if (signal.aborted) throw cancelError();
@@ -250,11 +250,10 @@
         if (signal.aborted) throw cancelError();
         progress(index, 100, "Generando enlace");
         const download = await post("/api/download-url", { key, filename: file.name }, signal);
-        completed.push({ file, url: download.downloadUrl });
+        card(file, download.downloadUrl);
+        results.hidden = false;
         progress(index, 100, "Completado");
       }
-      completed.forEach((item) => card(item.file, item.url));
-      results.hidden = false;
       say("Transferencia completada. Tus enlaces están listos.");
       files = [];
       render();
