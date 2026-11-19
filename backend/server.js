@@ -3,13 +3,15 @@ const path = require("node:path");
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
-const { S3Client, PutObjectCommand, GetObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand, ListObjectsV2Command, HeadObjectCommand } = require("@aws-sdk/client-s3");
+const { S3Client, PutObjectCommand, GetObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand, ListObjectsV2Command, HeadObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 const app = express();
 const port = Number(process.env.PORT || 10000);
 const uploadTtl = Number(process.env.UPLOAD_URL_TTL_SECONDS || 900);
 const downloadTtl = Number(process.env.DOWNLOAD_URL_TTL_SECONDS || 86400);
+const retentionDays = Number(process.env.FILE_RETENTION_DAYS || 7);
+const retentionMs = retentionDays * 24 * 60 * 60 * 1000;
 const maxFileSize = Number(process.env.MAX_FILE_SIZE_BYTES || 50 * 1024 ** 3);
 const allowedOrigins = (process.env.FRONTEND_ORIGIN || "")
   .split(",").map((origin) => origin.trim()).filter(Boolean);
@@ -81,6 +83,33 @@ function validateFilePayload(body) {
     err.status = 400; throw err;
   }
   return { filename, size, contentType };
+}
+
+async function cleanupExpiredFiles() {
+  if (!storageConfigured()) return;
+  const cutoff = Date.now() - retentionMs;
+  let continuationToken;
+  let deleted = 0;
+  do {
+    const page = await getS3().send(new ListObjectsV2Command({
+      Bucket: process.env.BUCKET_NAME,
+      Prefix: "sessions/",
+      MaxKeys: 1000,
+      ContinuationToken: continuationToken
+    }));
+    const expired = (page.Contents || []).filter(item =>
+      item.LastModified && new Date(item.LastModified).getTime() <= cutoff
+    );
+    for (let i = 0; i < expired.length; i += 50) {
+      const batch = expired.slice(i, i + 50);
+      await Promise.all(batch.map(item => getS3().send(new DeleteObjectCommand({
+        Bucket: process.env.BUCKET_NAME, Key: item.Key
+      }))));
+      deleted += batch.length;
+    }
+    continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (continuationToken);
+  if (deleted) console.log(`Retention cleanup removed ${deleted} expired file(s).`);
 }
 
 app.get("/health", (_req, res) => res.status(200).json({
@@ -157,15 +186,33 @@ app.post("/api/files", async (req, res, next) => {
   try {
     const prefix = sessionPrefix(req.body?.sessionId);
     const result = await getS3().send(new ListObjectsV2Command({ Bucket: process.env.BUCKET_NAME, Prefix: prefix, MaxKeys: 50 }));
-    const objects = await Promise.all((result.Contents || []).map(async (item) => {
+    const now = Date.now();
+    const objects = (result.Contents || []).filter(item => item.LastModified && now - new Date(item.LastModified).getTime() < retentionMs);
+    const expired = (result.Contents || []).filter(item => !objects.includes(item));
+    // Opportunistic cleanup also removes legacy files when their owner opens the session.
+    await Promise.all(expired.map(item => getS3().send(new DeleteObjectCommand({ Bucket: process.env.BUCKET_NAME, Key: item.Key }))));
+    const files = await Promise.all(objects.map(async (item) => {
       const head = await getS3().send(new HeadObjectCommand({ Bucket: process.env.BUCKET_NAME, Key: item.Key }));
       const filename = safeFilename(decodeURIComponent(head.Metadata?.originalname || item.Key.split("/").pop()));
       const command = new GetObjectCommand({ Bucket: process.env.BUCKET_NAME, Key: item.Key, ResponseContentDisposition: contentDisposition(filename) });
       const downloadUrl = await getSignedUrl(getS3(), command, { expiresIn: downloadTtl });
-      return { key: item.Key, filename, size: item.Size || 0, lastModified: item.LastModified || null, downloadUrl };
+      const expiresAt = new Date(new Date(item.LastModified).getTime() + retentionMs).toISOString();
+      return { key: item.Key, filename, size: item.Size || 0, lastModified: item.LastModified || null, expiresAt, downloadUrl };
     }));
-    objects.sort((a, b) => new Date(b.lastModified || 0) - new Date(a.lastModified || 0));
-    res.json({ files: objects, limit: 50, expiresIn: downloadTtl });
+    files.sort((a, b) => new Date(b.lastModified || 0) - new Date(a.lastModified || 0));
+    res.json({ files, limit: 50, expiresIn: downloadTtl, retentionDays });
+  } catch (err) { next(err); }
+});
+
+app.post("/api/files/delete", async (req, res, next) => {
+  try {
+    const prefix = sessionPrefix(req.body?.sessionId);
+    const key = String(req.body?.key || "");
+    if (!key.startsWith(prefix) || key.length > 1024 || key.includes("..")) {
+      return res.status(400).json({ error: "Invalid object key" });
+    }
+    await getS3().send(new DeleteObjectCommand({ Bucket: process.env.BUCKET_NAME, Key: key }));
+    res.json({ ok: true, deleted: true });
   } catch (err) { next(err); }
 });
 
@@ -197,4 +244,11 @@ app.use((err, _req, res, _next) => {
   res.status(status).json({ error: status === 500 ? "Internal server error" : err.message });
 });
 
-app.listen(port, "0.0.0.0", () => console.log(`Nexo Lab Storage API listening on ${port}`));
+app.listen(port, "0.0.0.0", () => {
+  console.log(`Nexo Lab Storage API listening on ${port}`);
+  cleanupExpiredFiles().catch(err => console.error("Initial retention cleanup failed:", err.message));
+  const cleanupTimer = setInterval(() => {
+    cleanupExpiredFiles().catch(err => console.error("Scheduled retention cleanup failed:", err.message));
+  }, 6 * 60 * 60 * 1000);
+  cleanupTimer.unref();
+});

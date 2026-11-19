@@ -26,5 +26,7 @@ Create a Node web service connected to this repository:
 - Files are uploaded directly from the browser to R2; the API never proxies file bytes.
 - Presigned upload URLs expire after 15 minutes.
 - Download links expire after 24 hours.
+- Uploaded objects are retained for up to 7 days; the API runs a cleanup sweep at startup and every 6 hours while running, and removes expired objects when a session is listed.
+- Users can permanently delete individual files from their private session.
 - CORS must be configured on the R2 bucket for the deployed frontend origin, allowing GET, PUT, HEAD and the required headers.
 - The MVP creates a unique object key per upload. Link possession grants access until expiry; there is no account system or revocation layer yet.

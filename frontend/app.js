@@ -204,7 +204,7 @@
       clearInterval(speedTimer);
     }
   }
-  function card(file, url) {
+  function card(file, url, key) {
     const element = document.createElement("article");
     element.className = "result-card";
     const heading = document.createElement("h3");
@@ -229,8 +229,28 @@
     linkRow.append(input, copy);
     const expiry = document.createElement("div");
     expiry.className = "link-expiry";
-    expiry.textContent = "Enlace válido durante 24 horas";
-    element.append(heading, qr, linkRow, expiry);
+    expiry.textContent = "Enlace válido 24 horas · Archivo disponible hasta 7 días";
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "delete-file-btn";
+    remove.textContent = "Eliminar archivo";
+    remove.addEventListener("click", async () => {
+      if (!key || remove.disabled) return;
+      if (!confirm("¿Eliminar este archivo definitivamente? Los enlaces dejarán de funcionar.")) return;
+      remove.disabled = true;
+      remove.textContent = "Eliminando…";
+      try {
+        await post("/api/files/delete", { key });
+        element.remove();
+        if (!cards.childElementCount) results.hidden = true;
+        say("Archivo eliminado correctamente.");
+      } catch (error) {
+        remove.disabled = false;
+        remove.textContent = "Eliminar archivo";
+        say("No se pudo eliminar el archivo: " + error.message, true);
+      }
+    });
+    element.append(heading, qr, linkRow, expiry, remove);
     cards.append(element);
     if (window.QRCode) new QRCode(qr, {
       text: url, width: 140, height: 140, correctLevel: QRCode.CorrectLevel.M
@@ -273,7 +293,7 @@
         if (signal.aborted) throw cancelError();
         progress(index, 100, "Generando enlace");
         const download = await post("/api/download-url", { key, filename: file.name }, signal);
-        card(file, download.downloadUrl);
+        card(file, download.downloadUrl, key);
         results.hidden = false;
         progress(index, 100, "Completado");
       }
@@ -339,9 +359,9 @@
       cards.replaceChildren();
       (data.files || []).forEach((item) => card({
         name: item.filename, size: item.size
-      }, item.downloadUrl));
+      }, item.downloadUrl, item.key));
       results.hidden = !(data.files || []).length;
-      if ((data.files || []).length) say("Se recuperaron " + data.files.length + " archivo(s) de esta sesión privada.");
+      if ((data.files || []).length) say("Se recuperaron " + data.files.length + " archivo(s). Los archivos se eliminan automáticamente a los 7 días; puedes borrarlos antes.");
     } catch (error) {
       say("No se pudo recuperar el historial de esta sesión: " + error.message, true);
     }
