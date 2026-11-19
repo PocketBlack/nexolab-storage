@@ -85,6 +85,33 @@ function validateFilePayload(body) {
   return { filename, size, contentType };
 }
 
+async function cleanupExpiredFiles() {
+  if (!storageConfigured()) return;
+  const cutoff = Date.now() - retentionMs;
+  let continuationToken;
+  let deleted = 0;
+  do {
+    const page = await getS3().send(new ListObjectsV2Command({
+      Bucket: process.env.BUCKET_NAME,
+      Prefix: "sessions/",
+      MaxKeys: 1000,
+      ContinuationToken: continuationToken
+    }));
+    const expired = (page.Contents || []).filter(item =>
+      item.LastModified && new Date(item.LastModified).getTime() <= cutoff
+    );
+    for (let i = 0; i < expired.length; i += 50) {
+      const batch = expired.slice(i, i + 50);
+      await Promise.all(batch.map(item => getS3().send(new DeleteObjectCommand({
+        Bucket: process.env.BUCKET_NAME, Key: item.Key
+      }))));
+      deleted += batch.length;
+    }
+    continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (continuationToken);
+  if (deleted) console.log(`Retention cleanup removed ${deleted} expired file(s).`);
+}
+
 app.get("/health", (_req, res) => res.status(200).json({
   status: "ok",
   service: "nexo-lab-storage-api",
@@ -217,4 +244,11 @@ app.use((err, _req, res, _next) => {
   res.status(status).json({ error: status === 500 ? "Internal server error" : err.message });
 });
 
-app.listen(port, "0.0.0.0", () => console.log(`Nexo Lab Storage API listening on ${port}`));
+app.listen(port, "0.0.0.0", () => {
+  console.log(`Nexo Lab Storage API listening on ${port}`);
+  cleanupExpiredFiles().catch(err => console.error("Initial retention cleanup failed:", err.message));
+  const cleanupTimer = setInterval(() => {
+    cleanupExpiredFiles().catch(err => console.error("Scheduled retention cleanup failed:", err.message));
+  }, 6 * 60 * 60 * 1000);
+  cleanupTimer.unref();
+});
