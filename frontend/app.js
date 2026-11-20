@@ -366,7 +366,8 @@
       }
     } catch (_) { /* Status check must not block access to existing files. */ }
   }
-\n  async function loadSessionFiles() {
+
+  async function loadSessionFiles() {
     try {
       const data = await post("/api/files", {});
       cards.replaceChildren();
