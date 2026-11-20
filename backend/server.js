@@ -3,7 +3,7 @@ const path = require("node:path");
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
-const { S3Client, PutObjectCommand, GetObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand, ListObjectsV2Command, HeadObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+const { S3Client, PutObjectCommand, GetObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand, ListObjectsV2Command, HeadObjectCommand, DeleteObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 const app = express();
@@ -12,6 +12,10 @@ const uploadTtl = Number(process.env.UPLOAD_URL_TTL_SECONDS || 900);
 const downloadTtl = Number(process.env.DOWNLOAD_URL_TTL_SECONDS || 86400);
 const retentionDays = Number(process.env.FILE_RETENTION_DAYS || 7);
 const retentionMs = retentionDays * 24 * 60 * 60 * 1000;
+const monthlyBudgetUsd = Number(process.env.NEXO_MONTHLY_BUDGET_USD || 25);
+const fixedMonthlyInfraCostUsd = Number(process.env.NEXO_FIXED_MONTHLY_INFRA_COST_USD || 0);
+const r2StorageUsdPerGbMonth = 0.015;
+const adminConfigKey = "nexolab-admin/service-config.json";
 const maxFileSize = Number(process.env.MAX_FILE_SIZE_BYTES || 50 * 1024 ** 3);
 const allowedOrigins = (process.env.FRONTEND_ORIGIN || "")
   .split(",").map((origin) => origin.trim()).filter(Boolean);
@@ -85,7 +89,62 @@ function validateFilePayload(body) {
   return { filename, size, contentType };
 }
 
-async function cleanupExpiredFiles() {
+
+async function readAdminConfig() {
+  try {
+    const result = await getS3().send(new GetObjectCommand({ Bucket: process.env.BUCKET_NAME, Key: adminConfigKey }));
+    const raw = await result.Body.transformToString();
+    return JSON.parse(raw);
+  } catch (err) {
+    if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) return { uploadsPaused: false, updatedAt: null };
+    throw err;
+  }
+}
+async function writeAdminConfig(config) {
+  const body = JSON.stringify({ ...config, updatedAt: new Date().toISOString() });
+  await getS3().send(new PutObjectCommand({
+    Bucket: process.env.BUCKET_NAME, Key: adminConfigKey, Body: body,
+    ContentType: "application/json", CacheControl: "no-store"
+  }));
+}
+function requireAdmin(req, res, next) {
+  const expected = process.env.NEXO_ADMIN_TOKEN;
+  const supplied = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+  if (!expected || !supplied || supplied.length !== expected.length ||
+      !crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  next();
+}
+async function getCapacitySnapshot() {
+  let continuationToken, totalBytes = 0, objectCount = 0;
+  do {
+    const page = await getS3().send(new ListObjectsV2Command({
+      Bucket: process.env.BUCKET_NAME, Prefix: "sessions/", MaxKeys: 1000,
+      ContinuationToken: continuationToken
+    }));
+    for (const item of page.Contents || []) {
+      totalBytes += Number(item.Size || 0);
+      objectCount += 1;
+    }
+    continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (continuationToken);
+  const storageGb = totalBytes / 1e9;
+  const estimatedStorageUsd = storageGb * r2StorageUsdPerGbMonth;
+  const estimatedMonthlyUsd = fixedMonthlyInfraCostUsd + estimatedStorageUsd;
+  return {
+    budgetUsd: monthlyBudgetUsd,
+    configuredFixedMonthlyCostUsd: fixedMonthlyInfraCostUsd,
+    storedBytes: totalBytes,
+    storedGbDecimal: Number(storageGb.toFixed(4)),
+    objectCount,
+    estimatedR2StorageUsdPerMonth: Number(estimatedStorageUsd.toFixed(4)),
+    estimatedMonthlyUsd: Number(estimatedMonthlyUsd.toFixed(2)),
+    budgetUsagePercent: monthlyBudgetUsd > 0 ? Number((estimatedMonthlyUsd / monthlyBudgetUsd * 100).toFixed(1)) : null,
+    note: "Estimate includes current R2 storage and the manually configured fixed monthly cost. It does not include all provider operations, bandwidth, taxes or overage charges."
+  };
+}
+\nasync function cleanupExpiredFiles() {
   if (!storageConfigured()) return;
   const cutoff = Date.now() - retentionMs;
   let continuationToken;
@@ -118,7 +177,32 @@ app.get("/health", (_req, res) => res.status(200).json({
   storageConfigured: storageConfigured()
 }));
 
-app.post("/api/upload-url", async (req, res, next) => {
+
+app.get("/api/service-status", async (_req, res, next) => {
+  try {
+    const config = await readAdminConfig();
+    res.set("Cache-Control", "no-store");
+    res.json({ uploadsAvailable: !config.uploadsPaused, uploadsPaused: Boolean(config.uploadsPaused), message: config.uploadsPaused ? "New uploads are temporarily paused." : null });
+  } catch (err) { next(err); }
+});
+app.get("/api/admin/capacity", requireAdmin, async (_req, res, next) => {
+  try {
+    const [config, capacity] = await Promise.all([readAdminConfig(), getCapacitySnapshot()]);
+    res.set("Cache-Control", "no-store");
+    res.json({ ...capacity, uploadsPaused: Boolean(config.uploadsPaused), updatedAt: config.updatedAt, warningThresholds: [50,75,90] });
+  } catch (err) { next(err); }
+});
+app.post("/api/admin/uploads", requireAdmin, async (req, res, next) => {
+  try {
+    if (typeof req.body?.paused !== "boolean") return res.status(400).json({ error: "paused must be boolean" });
+    const config = await readAdminConfig();
+    const nextConfig = { ...config, uploadsPaused: req.body.paused };
+    await writeAdminConfig(nextConfig);
+    res.set("Cache-Control", "no-store");
+    res.json({ ok: true, uploadsPaused: nextConfig.uploadsPaused, updatedAt: new Date().toISOString() });
+  } catch (err) { next(err); }
+});
+\napp.post("/api/upload-url", async (req, res, next) => {
   try {
     const { filename, size, contentType } = validateFilePayload(req.body);
     const key = makeObjectKey(filename, req.body?.sessionId);
