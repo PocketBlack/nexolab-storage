@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Administración — NexoLab Storage</title><link rel="stylesheet" href="legal.css"><style>
+.admin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:24px 0}.metric{background:#151515;border:1px solid #303030;border-radius:10px;padding:18px}.metric small{display:block;color:#999;margin-bottom:8px}.metric strong{font-size:25px}.admin-form{display:flex;gap:8px;flex-wrap:wrap}.admin-form input{flex:1;min-width:220px;background:#111;border:1px solid #444;border-radius:6px;color:#fff;padding:12px}.admin-button{padding:12px 16px;background:#c8a96b;border:0;border-radius:6px;color:#111;font-weight:700;cursor:pointer}.pause-button{padding:12px 16px;background:#311b18;border:1px solid #92564b;border-radius:6px;color:#f0b5a8;cursor:pointer}.resume-button{padding:12px 16px;background:#183022;border:1px solid #477a58;border-radius:6px;color:#b4e1c0;cursor:pointer}.admin-message{padding:12px;border:1px solid #333;border-radius:8px;color:#bbb;margin:14px 0}.hidden{display:none!important}.small{font-size:12px;color:#999}.meter{height:8px;background:#333;border-radius:8px;overflow:hidden;margin-top:10px}.meter span{display:block;height:100%;width:0;background:#c8a96b}
+</style></head><body><header class="legal-top"><a class="legal-brand" href="/">NEXO LAB / STORAGE</a></header><main class="legal-wrap"><div class="eyebrow">Panel privado · Administración</div><h1>Capacidad e infraestructura</h1><p>Este panel es exclusivo del titular. Los clientes no tienen acceso a métricas, presupuesto ni controles administrativos.</p>
+<section id="login"><h2>Acceso administrativo</h2><form class="admin-form" id="loginForm"><input id="token" type="password" autocomplete="current-password" placeholder="Token administrativo" required><button class="admin-button">Ingresar</button></form></section>
+<section id="dashboard" class="hidden"><div class="admin-grid">
+<div class="metric"><small>Presupuesto mensual</small><strong id="budget">US$25</strong></div>
+<div class="metric"><small>Estimación mensual actual</small><strong id="cost">—</strong></div>
+<div class="metric"><small>Almacenamiento ocupado</small><strong id="storage">—</strong></div>
+<div class="metric"><small>Archivos almacenados</small><strong id="objects">—</strong></div></div>
+<div class="metric"><small>Uso estimado del presupuesto</small><strong id="percent">—</strong><div class="meter"><span id="meter"></span></div><p class="small" id="threshold"></p></div>
+<h2>Control de nuevas cargas</h2><div class="admin-message" id="state">Consultando estado…</div><div class="admin-form"><button id="pause" class="pause-button" type="button">Pausar nuevas cargas</button><button id="resume" class="resume-button" type="button">Reactivar nuevas cargas</button><button id="refresh" class="admin-button" type="button">Actualizar métricas</button></div>
+<p class="small">La pausa bloquea nuevas cargas para todos los clientes. Las descargas existentes siguen habilitadas y las cargas multipart que ya comenzaron pueden finalizar. El presupuesto es una estimación: incluye almacenamiento R2 actual y el costo fijo mensual configurado manualmente, no todos los cargos de proveedores.</p></section><div id="message" class="admin-message" role="status"></div>
+<nav class="legal-nav"><a href="/">Volver a NexoLab</a></nav></main><footer class="legal-footer">NexoLab Storage · Panel administrativo privado</footer>
+<script>
+(() => {
+const API=(window.NEXO_API_BASE_URL||"").replace(/\/$/,"");
+const $=id=>document.getElementById(id);
+let token="";
+const auth=()=>({Authorization:"Bearer "+token,"Content-Type":"application/json"});
+async function request(path,options={}){const r=await fetch(API+path,{...options,headers:{...auth(),...(options.headers||{})},cache:"no-store"});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||"Error "+r.status);return d}
+function msg(t,bad=false){$("message").textContent=t;$("message").style.color=bad?"#e29a8c":"#bbb"}
+async function refresh(){const d=await request("/api/admin/capacity");$("budget").textContent="US$"+d.budgetUsd.toFixed(2);$("cost").textContent="US$"+d.estimatedMonthlyUsd.toFixed(2);$("storage").textContent=d.storedGbDecimal+" GB";$("objects").textContent=d.objectCount.toLocaleString("es-UY");$("percent").textContent=(d.budgetUsagePercent??0)+"%";$("meter").style.width=Math.min(100,d.budgetUsagePercent||0)+"%";$("threshold").textContent="Alertas visuales: "+d.warningThresholds.join("% · ")+"%. "+d.note;$("state").textContent=d.uploadsPaused?"PAUSA ACTIVA: no se aceptan nuevas cargas.":"SERVICIO ACTIVO: se aceptan nuevas cargas."; $("pause").disabled=d.uploadsPaused;$("resume").disabled=!d.uploadsPaused;msg("Métricas actualizadas.");}
+$("loginForm").addEventListener("submit",async e=>{e.preventDefault();token=$("token").value;try{await refresh();$("login").classList.add("hidden");$("dashboard").classList.remove("hidden");$("token").value="";}catch(err){token="";msg("No se pudo autenticar: "+err.message,true)}});
+$("pause").addEventListener("click",async()=>{if(!confirm("¿Pausar las nuevas cargas para todos los clientes?"))return;try{await request("/api/admin/uploads",{method:"POST",body:JSON.stringify({paused:true})});await refresh();}catch(e){msg(e.message,true)}});
+$("resume").addEventListener("click",async()=>{if(!confirm("¿Reactivar las nuevas cargas para todos los clientes?"))return;try{await request("/api/admin/uploads",{method:"POST",body:JSON.stringify({paused:false})});await refresh();}catch(e){msg(e.message,true)}});
+$("refresh").addEventListener("click",()=>refresh().catch(e=>msg(e.message,true)));
+})();
+</script></body></html>
