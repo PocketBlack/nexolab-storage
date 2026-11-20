@@ -12,6 +12,7 @@
 <h2>Control de nuevas cargas</h2><div class="admin-message" id="state">Consultando estado…</div><div class="admin-form"><button id="pause" class="pause-button" type="button">Pausar nuevas cargas</button><button id="resume" class="resume-button" type="button">Reactivar nuevas cargas</button><button id="refresh" class="admin-button" type="button">Actualizar métricas</button></div>
 <p class="small">La pausa bloquea nuevas cargas para todos los clientes. Las descargas existentes siguen habilitadas y las cargas multipart que ya comenzaron pueden finalizar. El presupuesto es una estimación: incluye almacenamiento R2 actual y el costo fijo mensual configurado manualmente, no todos los cargos de proveedores.</p></section><div id="message" class="admin-message" role="status"></div>
 <nav class="legal-nav"><a href="/">Volver a NexoLab</a></nav></main><footer class="legal-footer">NexoLab Storage · Panel administrativo privado</footer>
+<script src="/config.js"></script>
 <script>
 (() => {
 const API=(window.NEXO_API_BASE_URL||"").replace(/\/$/,"");
