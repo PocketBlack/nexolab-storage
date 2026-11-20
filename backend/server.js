@@ -144,7 +144,8 @@ async function getCapacitySnapshot() {
     note: "Estimate includes current R2 storage and the manually configured fixed monthly cost. It does not include all provider operations, bandwidth, taxes or overage charges."
   };
 }
-\nasync function cleanupExpiredFiles() {
+
+async function cleanupExpiredFiles() {
   if (!storageConfigured()) return;
   const cutoff = Date.now() - retentionMs;
   let continuationToken;
@@ -202,7 +203,8 @@ app.post("/api/admin/uploads", requireAdmin, async (req, res, next) => {
     res.json({ ok: true, uploadsPaused: nextConfig.uploadsPaused, updatedAt: new Date().toISOString() });
   } catch (err) { next(err); }
 });
-\napp.post("/api/upload-url", async (req, res, next) => {
+
+app.post("/api/upload-url", async (req, res, next) => {
   try {
     const { filename, size, contentType } = validateFilePayload(req.body);
     const key = makeObjectKey(filename, req.body?.sessionId);
