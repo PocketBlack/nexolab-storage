@@ -11,7 +11,7 @@
     sessionId = crypto.randomUUID();
     localStorage.setItem(SESSION_KEY, sessionId);
   }
-  let files = [], uploading = false, controller = null;
+  let files = [], uploading = false, controller = null, servicePaused = false;
   const progressState = new Map();
   const bytes = (n) => {
     if (!n) return "0 B";
@@ -65,7 +65,7 @@
       });
       list.append(row);
     });
-    upload.disabled = !files.length || uploading;
+    upload.disabled = !files.length || uploading || servicePaused;
     upload.innerHTML = "Subir " + (files.length || "") + " archivo" +
       (files.length === 1 ? "" : "s") + ' <span aria-hidden="true">↗</span>';
     clearBtn.disabled = !files.length || uploading;
@@ -353,7 +353,20 @@
     controller.abort();
   });
   upload.addEventListener("click", run);
-  async function loadSessionFiles() {
+
+  async function checkServiceStatus() {
+    try {
+      const response = await fetch(API + "/api/service-status", { cache: "no-store" });
+      if (!response.ok) return;
+      const state = await response.json();
+      servicePaused = Boolean(state.uploadsPaused);
+      if (servicePaused) {
+        upload.disabled = true;
+        say("Las nuevas cargas están temporalmente pausadas. Tus archivos existentes siguen disponibles para descargar.", true);
+      }
+    } catch (_) { /* Status check must not block access to existing files. */ }
+  }
+\n  async function loadSessionFiles() {
     try {
       const data = await post("/api/files", {});
       cards.replaceChildren();
