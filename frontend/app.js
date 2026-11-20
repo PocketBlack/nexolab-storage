@@ -65,7 +65,7 @@
       });
       list.append(row);
     });
-    upload.disabled = !files.length || uploading;
+    upload.disabled = !files.length || uploading || servicePaused;
     upload.innerHTML = "Subir " + (files.length || "") + " archivo" +
       (files.length === 1 ? "" : "s") + ' <span aria-hidden="true">↗</span>';
     clearBtn.disabled = !files.length || uploading;
